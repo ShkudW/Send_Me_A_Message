@@ -69,7 +69,7 @@ CHUNK_END          = "##END##"
 CHUNK_START_MARKER = "##CHUNK_START##"  # Server → Client: begin transfer (<name>|<total>)
 CHUNK_DONE         = "##CHUNK_DONE##"   # Server → Client: all chunks sent (<name>)
 
-UPLOAD_CHUNK_BYTES = 15 * 1024   # 15 KB raw per chunk
+UPLOAD_CHUNK_BYTES = 20 * 1024   # 20 KB raw per chunk
 
 SERVER_POLL_INTERVAL = 4      # base interval
 SERVER_POLL_TIMEOUT  = 120    # give up after this many seconds with no reply
@@ -1431,17 +1431,41 @@ def server_loop(tokens: dict, thread_id: str, debug: bool = False) -> None:
                 start_msg = f"{CHUNK_START_MARKER}{remote_name}|{total}{CHUNK_END}"
                 send_raw(thread_id, start_msg, tokens, debug)
                 print(f"  [  0%] transfer announced ({total} chunks)")
-                time.sleep(2)
+                # Short pause after the start marker so the Client has time to
+                # register the transfer before the first chunk arrives.
+                time.sleep(0.5)
 
                 sent_at_epoch = int(time.time() * 1000)
+                upload_start  = time.time()
 
                 for idx, chunk_b64 in enumerate(chunks):
                     msg = f"{CHUNK_START}{remote_name}|{total}|{idx}|{chunk_b64}{CHUNK_END}"
-                    send_raw(thread_id, msg, tokens, debug)
-                    pct = int((idx + 1) / total * 100)
-                    print(f"  [{pct:3d}%] chunk {idx+1}/{total} sent ({len(chunk_b64)} chars)")
+
+                    # Adaptive retry on HTTP 429 (Teams rate-limit)
+                    retries = 0
+                    while retries < 3:
+                        try:
+                            send_raw(thread_id, msg, tokens, debug)
+                            break
+                        except Exception as send_err:
+                            err_str = str(send_err)
+                            if "429" in err_str or "rate" in err_str.lower():
+                                print(f"  [!] Rate limited — waiting 10s before retry...")
+                                time.sleep(10)
+                                retries += 1
+                            else:
+                                raise
+
+                    pct     = int((idx + 1) / total * 100)
+                    elapsed = time.time() - upload_start
+                    rate    = (idx + 1) / elapsed if elapsed > 0 else 1
+                    eta     = int((total - idx - 1) / rate)
+                    print(f"  [{pct:3d}%] chunk {idx+1}/{total} ({len(chunk_b64)} chars) | ETA: {eta}s")
+
+                    # Inter-chunk delay: 1.5s instead of 3s — halves transfer time
+                    # while staying within Teams' ~1 msg/s rate limit.
                     if idx < total - 1:
-                        time.sleep(3)
+                        time.sleep(1.5)
 
                 done_msg = f"{CHUNK_DONE}{remote_name}{CHUNK_END}"
                 send_raw(thread_id, done_msg, tokens, debug)
