@@ -452,7 +452,7 @@ proc captureScreenPng*(): seq[byte] =
   let h = GetSystemMetrics(SM_CYSCREEN)
   let bmp = CreateCompatibleBitmap(screenDC, w, h)
   let old = SelectObject(memDC, bmp)
-  discard BitBlt(memDC, 0, 0, w, h, screenDC, 0, 0, SRCCOPY)
+  discard BitBlt(memDC, 0, 0, w, h, screenDC, 0, 0, SRCCOPY or CAPTUREBLT)
   SelectObject(memDC, old)
   DeleteDC(memDC)
   ReleaseDC(0, screenDC)
@@ -484,8 +484,9 @@ proc captureScreenPng*(): seq[byte] =
   bmpData[14] = 40   # header size
   let bw = w.uint32
   bmpData[18] = byte(bw and 0xFF); bmpData[19] = byte((bw shr 8) and 0xFF)
-  let bh = h.uint32
+  let bh = cast[uint32](-h.int32) 
   bmpData[22] = byte(bh and 0xFF); bmpData[23] = byte((bh shr 8) and 0xFF)
+  bmpData[24] = byte((bh shr 16) and 0xFF); bmpData[25] = byte((bh shr 24) and 0xFF)
   bmpData[26] = 1    # planes
   bmpData[28] = 32   # bits per pixel
   # Pixel data (already in BGRA order from GetDIBits)
