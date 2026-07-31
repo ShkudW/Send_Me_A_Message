@@ -1525,6 +1525,8 @@ def server_loop(tokens: dict, thread_id: str, debug: bool = False) -> None:
             for msg in messages:
                 msg_id    = int(msg.get("id", "0"))
                 content   = html.unescape(msg.get("content", "") or "")
+                #if OUT_START in content or "DOWNLOAD" in content:
+                    #print(f"  [DBG] msg_id={msg_id} sent_at={sent_at_epoch} diff={msg_id - sent_at_epoch} content[:80]={content[:80]}")
                 msg_type  = msg.get("type", "")
                 props     = msg.get("properties", {})
 
