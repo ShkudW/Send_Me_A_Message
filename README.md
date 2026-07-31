@@ -33,6 +33,8 @@ mv <src> <dst> = MoveFileW
 cp <src> <dst> = CopyFileW
 screenshot     = BitBlt + GetDC (saves PNG, returns base64)
 clipboard      = OpenClipboard + GetClipboardData
+exec           = CreateProcessW
+exec_spoof     = CreateToolhelp32Snapshot + Process32FirstW + OpenProcess + UpdateProcThreadAttribute 
 getpid         = GetCurrentProcessId
 ```
 
