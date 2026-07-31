@@ -194,7 +194,7 @@ SetupScreen {
 """
 
 #########################################################################################
-_tui_app: Optional["C2App"] = None 
+_tui_app: Optional["Send_Me_A_Message"] = None 
 
 
 def _tui_log(msg: str, style: str = "normal") -> None:
