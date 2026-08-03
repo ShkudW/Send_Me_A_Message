@@ -38,7 +38,18 @@ exec_spoof     = CreateToolhelp32Snapshot + Process32FirstW + OpenProcess + Upda
 getpid         = GetCurrentProcessId
 ```
 
-* Compile the client with NIM:
+### Compile the client with NIM:
+* install libraries:
+```text
+nimble install winim
+nimble install nimcrypto
+nimble install regex
+```
+* Download gcc:
+```text
+https://sourceforge.net/projects/mingw-w64/files/latest/download
+```
+* Compile the Agent:
 ```text
 nim.exe c --app:gui --cpu:amd64 --nimcache:nimcache_new -p:src -o:taskhostw.exe src\teams_client.nim
 ```
